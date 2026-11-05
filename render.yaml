@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: personal-habit-tracker
+    runtime: docker
+    plan: free
+    branch: main
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: JAVA_TOOL_OPTIONS
+        value: -Duser.timezone=Asia/Kolkata
+      - key: JDBC_URL
+        sync: false
+      - key: JDBC_USER
+        sync: false
+      - key: JDBC_PASSWORD
+        sync: false

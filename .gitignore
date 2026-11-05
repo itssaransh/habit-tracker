@@ -1,0 +1,8 @@
+target/
+data/
+.build/
+.codex-finalizer/
+tmp/
+.idea/
+*.iml
+*.log

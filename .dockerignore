@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+.build
+.codex-finalizer
+.env
+data
+target
+tmp
+*.iml
+*.log
