@@ -109,4 +109,4 @@ docs/                         Project report and database design
 
 - [Project report](docs/PROJECT_REPORT.md)
 - [Database design](docs/DATABASE_DESIGN.md)
-- [Project presentation](docs/HabitFlow_Project_Presentation_v2.pptx)
+- [Project presentation](docs/HabitFlow_Presentation.pptx)
