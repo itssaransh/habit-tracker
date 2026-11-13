@@ -5,9 +5,10 @@
     const body = document.body;
     const base = body.dataset.base || '/';
     const cards = Array.from(document.querySelectorAll('.habit-card'));
-    const history = readStore('hf-history-v1', {});
-    const metadata = readStore('hf-metadata-v1', {});
-    const focusData = readStore('hf-focus-v1', { totalMinutes: 0, byHabit: {}, byDay: {} });
+    const history = {};
+    const metadata = {};
+    const focusData = { totalMinutes: 0, byHabit: {}, byDay: {} };
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayKey = dateKey(today);
@@ -18,24 +19,47 @@
     });
     let activeCategory = 'All';
     let activeTime = 'All';
+    let matrixWindow = 7;
     let timerMinutes = 25;
     let timerRemaining = timerMinutes * 60;
     let timerElapsed = 0;
     let timerRunning = false;
     let timerHandle = null;
-
-    function readStore(key, fallback) {
+    function setSync(message, state) {
+        const node = document.getElementById('sync-status');
+        if (!node) return;
+        node.textContent = message;
+        node.dataset.state = state || 'ok';
+    }
+    async function saveRemote(payload) {
+        setSync('Saving…', 'busy');
         try {
-            const value = JSON.parse(localStorage.getItem(key) || 'null');
-            return value && typeof value === 'object' ? value : fallback;
-        } catch (error) {
-            return fallback;
-        }
+            const response = await fetch(base + 'api/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify(payload) });
+            const result = await response.json().catch(function () { return {}; });
+            if (!response.ok) { setSync('Not saved', 'error'); announce(result.error || 'Your change could not be saved.'); return false; }
+            setSync('All changes saved', 'ok');
+            return true;
+        } catch (error) { setSync('Sync unavailable', 'error'); announce('Could not reach HabitFlow. Your change was not saved.'); return false; }
     }
-    function writeStore(key, value) {
-        try { localStorage.setItem(key, JSON.stringify(value)); return true; }
-        catch (error) { announce('Browser storage is unavailable. This change may not be saved.'); return false; }
+    async function loadRemote() {
+        setSync('Syncing…', 'busy');
+        try {
+            const response = await fetch(base + 'api/workspace', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+            if (!response.ok) throw new Error('sync failed');
+            const data = await response.json();
+            Object.keys(data.done || {}).forEach(function (key) { history[key] = true; });
+            Object.keys(data.metadata || {}).forEach(function (id) { metadata[id] = data.metadata[id] || {}; const target = metadata[id].targets || {}; metadata[id].target = target[todayKey] || null; });
+            Object.assign(focusData, data.focus || {});
+            focusData.byHabit = focusData.byHabit || {}; focusData.byDay = focusData.byDay || {};
+            if (data.theme === 'light' || data.theme === 'dark') {
+                document.documentElement.classList.toggle('dark', data.theme === 'dark');
+                document.querySelectorAll('[data-theme-toggle]').forEach(function (button) { button.setAttribute('aria-label', data.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'); });
+                syncThemeColor();
+            }
+            setSync('All changes synced', 'ok'); renderAll();
+        } catch (error) { setSync('Sync unavailable', 'error'); announce('Your account data could not be loaded. Please refresh when your connection is available.'); }
     }
+
     function dateKey(date) {
         return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
     }
@@ -68,10 +92,12 @@
     }
     function togglePast(card, key) {
         const historyKey = card.dataset.habitId + '|' + key;
-        if (history[historyKey]) delete history[historyKey];
-        else history[historyKey] = true;
-        writeStore('hf-history-v1', history);
-        renderAll();
+        const completed = !history[historyKey];
+        saveRemote({ action: 'checkin', habitId: Number(card.dataset.habitId), date: key, completed: completed }).then(function (saved) {
+            if (!saved) return;
+            if (completed) history[historyKey] = true; else delete history[historyKey];
+            renderAll();
+        });
     }
     function submitCheckin(card) {
         const form = card.querySelector('.checkin-form');
@@ -103,7 +129,7 @@
             number.textContent = String(date.getDate());
             button.append(letter, number);
         }
-        button.addEventListener('click', function () {
+        button.addEventListener('click', async function () {
             if (key === todayKey) submitCheckin(card);
             else togglePast(card, key);
         });
@@ -143,6 +169,29 @@
             if (row) row.classList.add('target-idle');
         }
     }
+    function renderNoteHistory(card) {
+        const root = card.querySelector('.note-history');
+        if (!root) return;
+        root.replaceChildren();
+        const notes = metaFor(card.dataset.habitId).notes || {};
+        Object.keys(notes).filter(function (key) { return notes[key]; }).sort().reverse().forEach(function (key) {
+            const entry = document.createElement('article');
+            entry.className = 'note-history-entry';
+            const date = document.createElement('time');
+            date.dateTime = key;
+            date.textContent = new Date(key + 'T00:00:00').toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' });
+            const text = document.createElement('p');
+            text.textContent = notes[key];
+            entry.append(date, text);
+            root.appendChild(entry);
+        });
+        if (!root.children.length) {
+            const empty = document.createElement('p');
+            empty.className = 'note-history-empty';
+            empty.textContent = 'No notes recorded yet. Add your first reflection above.';
+            root.appendChild(empty);
+        }
+    }
     function updateFocusBadge(card) {
         const badge = card.querySelector('.focus-badge');
         const minutes = Number(focusData.byHabit[card.dataset.habitId]) || 0;
@@ -167,13 +216,18 @@
     function renderMatrix() {
         const table = document.getElementById('matrix-table');
         if (!table) return;
+        const matrixDates = Array.from({ length: matrixWindow }, function (_, index) {
+            const date = new Date(today);
+            date.setDate(today.getDate() - (matrixWindow - index - 1));
+            return date;
+        });
         table.replaceChildren();
         const thead = document.createElement('thead');
         const headerRow = document.createElement('tr');
         const habitHeading = document.createElement('th');
         habitHeading.textContent = 'Habit';
         headerRow.appendChild(habitHeading);
-        weekDates.forEach(function (date) {
+        matrixDates.forEach(function (date) {
             const th = document.createElement('th');
             if (dateKey(date) === todayKey) th.className = 'today-col';
             const name = document.createElement('span');
@@ -194,7 +248,7 @@
         if (!cards.length) {
             const row = document.createElement('tr');
             const cell = document.createElement('td');
-            cell.colSpan = 9;
+            cell.colSpan = matrixDates.length + 2;
             cell.className = 'empty-matrix';
             cell.textContent = 'Create a habit to see your weekly matrix.';
             row.appendChild(cell);
@@ -216,7 +270,7 @@
             name.append(dot, text);
             nameCell.appendChild(name);
             row.appendChild(nameCell);
-            weekDates.forEach(function (date) {
+            matrixDates.forEach(function (date) {
                 const cell = document.createElement('td');
                 cell.appendChild(dayButton(card, date, true));
                 row.appendChild(cell);
@@ -233,7 +287,7 @@
         const title = document.createElement('td');
         title.textContent = 'Daily completion';
         summary.appendChild(title);
-        weekDates.forEach(function (date) {
+        matrixDates.forEach(function (date) {
             const cell = document.createElement('td');
             cell.className = 'summary-count';
             const key = dateKey(date);
@@ -278,37 +332,44 @@
         }, 0);
         document.getElementById('consistency-score').textContent =
             (scheduledTotal ? Math.round(completedTotal / scheduledTotal * 100) : 0) + '%';
-        document.getElementById('focus-total').textContent = (Number(focusData.totalMinutes) || 0) + ' min';
+        const todayScheduled = cards.filter(function (card) { return isScheduled(card, today); }).length;
+        const todayCompleted = cards.filter(function (card) { return isScheduled(card, today) && doneFor(card, todayKey); }).length;
+        document.getElementById('analytics-today-rate').textContent =
+            (todayScheduled ? Math.round(todayCompleted / todayScheduled * 100) : 0) + '%';
         document.getElementById('timer-side-total').textContent = (Number(focusData.totalMinutes) || 0) + ' min';
 
         const categoryRoot = document.getElementById('category-breakdown');
         categoryRoot.replaceChildren();
         const categoryColors = { Mind: '#7C3AED', Body: '#F08C46', Career: '#D41514', Wellness: '#0FA77A', Learning: '#2583D8' };
         ['Mind', 'Body', 'Career', 'Wellness', 'Learning'].forEach(function (category) {
-            const count = cards.filter(function (card) { return card.dataset.category === category; }).length;
+            const categoryCards = cards.filter(function (card) { return card.dataset.category === category; });
+            const count = categoryCards.length;
+            const averageRate = count ? Math.round(categoryCards.reduce(function (sum, card) {
+                return sum + rate(card);
+            }, 0) / count) : 0;
             const row = document.createElement('div');
             row.className = 'category-row';
             const label = document.createElement('span');
-            label.textContent = category;
+            label.textContent = category + ' (' + count + (count === 1 ? ' habit' : ' habits') + ')';
             const track = document.createElement('span');
             track.className = 'category-track';
             const fill = document.createElement('span');
-            fill.style.width = (cards.length ? Math.round(count / cards.length * 100) : 0) + '%';
+            fill.style.width = averageRate + '%';
             fill.style.setProperty('--bar-color', categoryColors[category]);
             track.appendChild(fill);
             const value = document.createElement('strong');
-            value.textContent = String(count);
+            value.textContent = averageRate + '%';
             row.append(label, track, value);
             categoryRoot.appendChild(row);
         });
 
         const leaderboard = document.getElementById('leaderboard');
         leaderboard.replaceChildren();
-        const ranked = cards.slice().sort(function (a, b) { return rate(b) - rate(a); });
+        const ranked = cards.slice().sort(function (a, b) { return streak(b) - streak(a); });
         if (!ranked.length) {
             const empty = document.createElement('p');
             empty.className = 'storage-note';
-            empty.textContent = 'Add habits to start your leaderboard.';
+            empty.textContent = 'Add habits to start your streak leaderboard.';
             leaderboard.appendChild(empty);
         }
         ranked.forEach(function (card, index) {
@@ -321,11 +382,16 @@
             name.className = 'leader-name';
             name.textContent = card.querySelector('.habit-title').textContent;
             const score = document.createElement('strong');
-            score.textContent = rate(card) + '%';
+            score.textContent = streak(card) + ' days';
             row.append(rank, name, score);
             leaderboard.appendChild(row);
         });
         renderHeatmap();
+        render28DayHeatmap();
+    }
+    function streak(card) {
+        const match = card.querySelector('.habit-meta').textContent.match(/♨\s*(\d+)d/);
+        return match ? Number(match[1]) : 0;
     }
     function rate(card) {
         const match = card.querySelector('.habit-meta').textContent.match(/(\d+)%\s*month/);
@@ -356,6 +422,27 @@
             cell.className = 'heat-cell' + (level ? ' level-' + level : '') + (date > today ? ' empty' : '');
             cell.title = date.toLocaleDateString('en', { month: 'short', day: 'numeric' }) + ': ' + count + ' habits completed';
             root.appendChild(cell);
+        }
+    }
+    function render28DayHeatmap() {
+        const root = document.getElementById('intensity-heatmap');
+        if (!root) return;
+        root.replaceChildren();
+        for (let offset = 27; offset >= 0; offset--) {
+            const date = new Date(today);
+            date.setDate(today.getDate() - offset);
+            const scheduled = cards.filter(function (card) { return isScheduled(card, date); });
+            const completed = scheduled.filter(function (card) { return doneFor(card, dateKey(date)); }).length;
+            const percent = scheduled.length ? Math.round(completed / scheduled.length * 100) : 0;
+            const tile = document.createElement('div');
+            tile.className = 'intensity-tile' + (percent >= 80 ? ' level-4' : percent >= 50 ? ' level-3' : percent >= 25 ? ' level-2' : percent > 0 ? ' level-1' : '');
+            tile.title = date.toLocaleDateString('en', { month: 'short', day: 'numeric' }) + ': ' + completed + '/' + scheduled.length + ' habits completed';
+            const month = document.createElement('span');
+            month.textContent = date.toLocaleDateString('en', { month: 'short' });
+            const day = document.createElement('strong');
+            day.textContent = String(date.getDate());
+            tile.append(month, day);
+            root.appendChild(tile);
         }
     }
     function renderAll() {
@@ -394,38 +481,107 @@
     function syncThemeColor() {
         const themeMeta = document.querySelector('meta[name="theme-color"]');
         if (themeMeta) {
-            themeMeta.content = document.documentElement.classList.contains('dark') ? '#080808' : '#FAF8F3';
+            themeMeta.content = document.documentElement.classList.contains('dark') ? '#080808' : '#F8FAFC';
         }
     }
     window.openModal = function () {
         const modal = document.getElementById('habit-modal');
+        const form = document.getElementById('add-habit');
+        form.reset();
+        document.getElementById('edit-habit-id').value = '';
+        document.getElementById('edit-target-count').value = '0';
+        document.getElementById('edit-target-total').value = '1';
+        document.getElementById('edit-settings').hidden = true;
+        document.getElementById('habit-modal-kicker').textContent = 'NEW ROUTINE';
+        document.getElementById('modal-title').textContent = 'Create a habit';
+        document.getElementById('habit-submit').innerHTML = 'Add to my routine <span>→</span>';
         modal.classList.add('open');
         modal.setAttribute('aria-hidden', 'false');
         window.setTimeout(function () { modal.querySelector('input[name="name"]').focus(); }, 20);
     };
+    document.querySelectorAll('.edit-btn').forEach(function (button) {
+        button.addEventListener('click', function () {
+            const card = button.closest('.habit-card');
+            const id = card.dataset.habitId;
+            const item = metaFor(id);
+            const target = item.target && item.target.date === todayKey ? item.target : { count: 0, total: 1 };
+            const form = document.getElementById('add-habit');
+            form.reset();
+            document.getElementById('edit-habit-id').value = id;
+            document.getElementById('edit-target-count').value = String(Math.min(Number(target.count) || 0, Number(target.total) || 1));
+            document.getElementById('edit-target-total').value = String(Number(target.total) || 1);
+            document.getElementById('edit-time-of-day').value = item.time || 'Anytime';
+            form.elements.namedItem('name').value = card.querySelector('.habit-title').textContent.trim();
+            form.elements.namedItem('description').value = card.querySelector('.habit-description').textContent.trim();
+            form.elements.namedItem('category').value = card.dataset.category;
+            form.elements.namedItem('frequency').value = card.dataset.frequency;
+            const color = card.dataset.color.toUpperCase();
+            const colorInput = Array.from(form.querySelectorAll('input[name="color"]')).find(function (input) { return input.value.toUpperCase() === color; });
+            if (colorInput) colorInput.checked = true;
+            document.getElementById('edit-settings').hidden = false;
+            document.getElementById('habit-modal-kicker').textContent = 'UPDATE ROUTINE';
+            document.getElementById('modal-title').textContent = 'Edit habit';
+            document.getElementById('habit-submit').innerHTML = 'Save changes <span>→</span>';
+            const modal = document.getElementById('habit-modal');
+            modal.classList.add('open');
+            modal.setAttribute('aria-hidden', 'false');
+            form.elements.namedItem('name').focus();
+        });
+    });
+    document.getElementById('edit-target-total').addEventListener('input', function (event) {
+        const total = Math.max(1, Math.min(50, Number(event.target.value) || 1));
+        const countInput = document.getElementById('edit-target-count');
+        countInput.value = String(Math.min(Number(countInput.value) || 0, total));
+    });
     window.closeModal = function () {
         const modal = document.getElementById('habit-modal');
         modal.classList.remove('open');
         modal.setAttribute('aria-hidden', 'true');
     };
+    const profileToggle = document.getElementById('profile-menu-toggle');
+    const profileDropdown = document.getElementById('profile-dropdown');
+    const accountModal = document.getElementById('account-settings-modal');
+    function openAccountSettings() {
+        if (profileDropdown) profileDropdown.hidden = true;
+        if (profileToggle) profileToggle.setAttribute('aria-expanded', 'false');
+        accountModal.classList.add('open'); accountModal.setAttribute('aria-hidden', 'false');
+    }
+    if (profileToggle && profileDropdown) profileToggle.addEventListener('click', function () {
+        const show = profileDropdown.hidden; profileDropdown.hidden = !show; profileToggle.setAttribute('aria-expanded', String(show));
+    });
+    document.querySelectorAll('#open-account-settings,#header-account-settings').forEach(function (button) { button.addEventListener('click', openAccountSettings); });
+    document.getElementById('close-account-settings').addEventListener('click', function () { accountModal.classList.remove('open'); accountModal.setAttribute('aria-hidden', 'true'); });
+    accountModal.addEventListener('click', function (event) { if (event.target === accountModal) { accountModal.classList.remove('open'); accountModal.setAttribute('aria-hidden', 'true'); } });
 
     document.querySelectorAll('[data-view]').forEach(function (button) {
         button.addEventListener('click', function () { switchView(button.dataset.view); });
+    });
+    document.querySelectorAll('[data-matrix-days]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            matrixWindow = Number(button.dataset.matrixDays) === 14 ? 14 : 7;
+            document.querySelectorAll('[data-matrix-days]').forEach(function (option) {
+                const active = Number(option.dataset.matrixDays) === matrixWindow;
+                option.classList.toggle('active', active);
+                option.setAttribute('aria-pressed', String(active));
+            });
+            document.getElementById('matrix-window-label').textContent = matrixWindow + ' DAYS';
+            renderMatrix();
+        });
     });
     document.querySelectorAll('[data-open-view]').forEach(function (button) {
         button.addEventListener('click', function () { switchView(button.dataset.openView); });
     });
     document.querySelectorAll('[data-theme-toggle]').forEach(function (button) {
-        button.addEventListener('click', function () {
+        button.addEventListener('click', async function () {
             const dark = document.documentElement.classList.toggle('dark');
             document.querySelectorAll('[data-theme-toggle]').forEach(function (toggle) {
                 toggle.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
             });
             syncThemeColor();
-            try {
-                localStorage.setItem('habitflow-theme', dark ? 'dark' : 'light');
-            } catch (error) {
-                announce('Theme preference could not be saved in this browser.');
+            if (!(await saveRemote({ action: 'theme', theme: dark ? 'dark' : 'light' }))) {
+                document.documentElement.classList.toggle('dark', !dark);
+                document.querySelectorAll('[data-theme-toggle]').forEach(function (toggle) { toggle.setAttribute('aria-label', dark ? 'Switch to dark mode' : 'Switch to light mode'); });
+                syncThemeColor();
             }
         });
     });
@@ -445,10 +601,11 @@
     });
     document.getElementById('habit-search').addEventListener('input', applyFilters);
     document.querySelectorAll('.checkin-form').forEach(function (form) {
-        form.addEventListener('submit', function () {
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
             const card = form.closest('.habit-card');
             const note = (metaFor(card.dataset.habitId).notes || {})[todayKey] || '';
-            form.querySelector('input[name="note"]').value = note;
+            if (await saveRemote({ action: 'checkin', habitId: Number(card.dataset.habitId), date: todayKey, completed: card.dataset.completed !== 'true', note: note })) window.location.reload();
         });
     });
     document.querySelectorAll('.target-step').forEach(function (button) {
@@ -459,39 +616,61 @@
             current.total = Math.max(1, Math.min(50, Number(current.total) || 1));
             current.count = Math.max(0, Math.min(current.total, (Number(current.count) || 0) + Number(button.dataset.targetChange)));
             item.target = current;
-            writeStore('hf-metadata-v1', metadata);
-            updateTarget(card);
+            item.targets = item.targets || {}; item.targets[todayKey] = current;
+            saveRemote({ action: 'metadata', habitId: Number(card.dataset.habitId), date: todayKey, time: item.time || 'Anytime', count: current.count, total: current.total }).then(function (saved) { if (saved) updateTarget(card); else renderAll(); });
         });
     });
     document.querySelectorAll('.note-toggle').forEach(function (button) {
-        button.addEventListener('click', function () {
-            const drawer = button.closest('.habit-card').querySelector('.note-drawer');
-            drawer.hidden = !drawer.hidden;
-            if (!drawer.hidden) drawer.querySelector('textarea').focus();
+        button.addEventListener('click', async function () {
+            const card = button.closest('.habit-card');
+            const drawer = card.querySelector('.note-drawer');
+            const shouldOpen = drawer.hidden;
+            document.querySelectorAll('.note-drawer').forEach(function (other) { other.hidden = true; });
+            drawer.querySelector('.note-habit-name').textContent = card.querySelector('.habit-title').textContent;
+            drawer.hidden = !shouldOpen;
+            if (!drawer.hidden) {
+                renderNoteHistory(card);
+                drawer.querySelector('textarea').focus();
+            }
         });
     });
+    document.querySelectorAll('.note-close').forEach(function (button) {
+        button.addEventListener('click', function () { button.closest('.note-drawer').hidden = true; });
+    });
+    document.querySelectorAll('.note-drawer').forEach(function (drawer) {
+        drawer.addEventListener('click', function (event) {
+            if (event.target === drawer) drawer.hidden = true;
+        });
+    });
+    document.addEventListener('keydown', function (event) {
+        if (event.key !== 'Escape') return;
+        document.querySelectorAll('.note-drawer').forEach(function (drawer) { drawer.hidden = true; });
+        if (document.getElementById('habit-modal').classList.contains('open')) window.closeModal();
+    });
     document.querySelectorAll('.save-note-btn').forEach(function (button) {
-        button.addEventListener('click', function () {
+        button.addEventListener('click', async function () {
             const card = button.closest('.habit-card');
             const item = metaFor(card.dataset.habitId);
-            if (!item.notes) item.notes = {};
-            item.notes[todayKey] = card.querySelector('.daily-note').value.trim();
-            item.time = card.querySelector('.time-select').value;
-            writeStore('hf-metadata-v1', metadata);
+            const noteText = card.querySelector('.daily-note').value.trim();
+            const time = card.querySelector('.time-select').value;
+            const target = item.target || { date: todayKey, count: 0, total: 1 };
+            if (!(await saveRemote({ action: 'note', habitId: Number(card.dataset.habitId), date: todayKey, note: noteText }))) return;
+            if (!(await saveRemote({ action: 'metadata', habitId: Number(card.dataset.habitId), date: todayKey, time: time, count: target.count, total: target.total }))) return;
+            item.notes = item.notes || {}; item.notes[todayKey] = noteText; item.time = time; item.target = target;
             card.querySelector('.time-label').textContent = item.time;
+            renderNoteHistory(card);
             applyFilters();
-            announce('Note saved in this browser.');
+            announce('Note saved to your account.');
             button.textContent = 'Saved';
             window.setTimeout(function () { button.textContent = 'Save note'; }, 1200);
         });
     });
     document.querySelectorAll('.time-select').forEach(function (select) {
-        select.addEventListener('change', function () {
+        select.addEventListener('change', async function () {
             const card = select.closest('.habit-card');
-            metaFor(card.dataset.habitId).time = select.value;
-            writeStore('hf-metadata-v1', metadata);
-            card.querySelector('.time-label').textContent = select.value;
-            applyFilters();
+            const item = metaFor(card.dataset.habitId), target = item.target || { date: todayKey, count: 0, total: 1 };
+            if (await saveRemote({ action: 'metadata', habitId: Number(card.dataset.habitId), date: todayKey, time: select.value, count: target.count, total: target.total })) { item.time = select.value; item.target = target; card.querySelector('.time-label').textContent = select.value; applyFilters(); }
+            else select.value = item.time || 'Anytime';
         });
     });
     document.querySelectorAll('.focus-habit').forEach(function (button) {
@@ -505,17 +684,8 @@
         button.addEventListener('click', async function () {
             if (!window.confirm('Delete this habit and its check-in history?')) return;
             try {
-                const response = await fetch(base + 'habits?id=' + encodeURIComponent(button.dataset.id), { method: 'DELETE' });
+                const response = await fetch(base + 'habits?id=' + encodeURIComponent(button.dataset.id), { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken } });
                 if (response.ok) {
-                    const id = button.dataset.id;
-                    delete metadata[id];
-                    Object.keys(history).forEach(function (key) {
-                        if (key.indexOf(id + '|') === 0) delete history[key];
-                    });
-                    delete focusData.byHabit[id];
-                    writeStore('hf-metadata-v1', metadata);
-                    writeStore('hf-history-v1', history);
-                    writeStore('hf-focus-v1', focusData);
                     window.location.reload();
                 }
                 else window.alert('The habit could not be deleted. Please try again.');
@@ -529,6 +699,7 @@
             const form = document.createElement('form');
             form.method = 'post';
             form.action = base + 'habits';
+            const csrf = document.createElement('input'); csrf.type = 'hidden'; csrf.name = 'csrfToken'; csrf.value = csrfToken; form.appendChild(csrf);
             [['name', button.dataset.name], ['description', button.dataset.description],
                 ['category', button.dataset.category], ['frequency', button.dataset.frequency],
                 ['color', button.dataset.color]].forEach(function (pair) {
@@ -548,7 +719,7 @@
         if (event.target.id === 'habit-modal') window.closeModal();
     });
     document.addEventListener('keydown', function (event) {
-        if (event.key === 'Escape') window.closeModal();
+        if (event.key === 'Escape') { window.closeModal(); accountModal.classList.remove('open'); accountModal.setAttribute('aria-hidden', 'true'); if (profileDropdown) profileDropdown.hidden = true; }
     });
     document.getElementById('live-date').textContent = new Intl.DateTimeFormat('en-GB', {
         day: '2-digit', month: 'short', year: 'numeric'
@@ -597,17 +768,18 @@
         timerElapsed = 0;
         updateTimer();
     });
-    document.getElementById('timer-complete').addEventListener('click', function () {
+    document.getElementById('timer-complete').addEventListener('click', async function () {
         stopTimer();
         if (timerElapsed < 1) { announce('Start a focus session before logging time.'); return; }
         const minutes = Math.max(1, Math.round(timerElapsed / 60));
         const habitId = document.getElementById('timer-habit').value;
+        const startedAt = new Date(Date.now() - timerElapsed * 1000).toISOString();
+        if (!(await saveRemote({ action: 'focus', habitId: habitId || null, startedAt: startedAt, minutes: minutes }))) return;
         focusData.totalMinutes = (Number(focusData.totalMinutes) || 0) + minutes;
         focusData.byDay[todayKey] = (Number(focusData.byDay[todayKey]) || 0) + minutes;
         if (habitId) focusData.byHabit[habitId] = (Number(focusData.byHabit[habitId]) || 0) + minutes;
-        writeStore('hf-focus-v1', focusData);
         renderAll();
-        announce(minutes + ' focus minutes saved in this browser.');
+        announce(minutes + ' focus minutes saved to your account.');
         const card = cards.find(function (item) { return item.dataset.habitId === habitId; });
         if (card && card.dataset.completed !== 'true' && card.dataset.scheduled === 'true') {
             submitCheckin(card);
@@ -658,13 +830,12 @@
         announce('Routine data exported.');
     });
 
-    let existingTheme = 'light';
-    try { existingTheme = localStorage.getItem('habitflow-theme') || 'light'; }
-    catch (error) { /* The saved theme is optional. */ }
+    const existingTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
     document.querySelectorAll('[data-theme-toggle]').forEach(function (button) {
-        if (existingTheme === 'dark') button.setAttribute('aria-label', 'Switch to light mode');
+        button.setAttribute('aria-label', existingTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
     });
     syncThemeColor();
     updateTimer();
     renderAll();
+    loadRemote();
 })();

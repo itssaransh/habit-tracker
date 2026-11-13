@@ -7,6 +7,9 @@ import com.habitflow.config.Database;
 import com.habitflow.model.Habit;
 import com.habitflow.model.HabitStats;
 import com.habitflow.service.HabitService;
+import com.habitflow.model.UserAccount;
+import com.habitflow.web.SecurityFilter;
+import com.habitflow.dao.JdbcWorkspaceDao;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -28,7 +31,10 @@ public class DashboardServlet extends HttpServlet {
             throws ServletException, IOException {
         HabitService service = (HabitService) getServletContext().getAttribute("habitService");
         LocalDate today = LocalDate.now();
-        List<Habit> habits = service.getHabits();
+        UserAccount account = (UserAccount) request.getSession(false).getAttribute(SecurityFilter.ACCOUNT);
+        List<Habit> habits = service.getHabits(account.id());
+        request.setAttribute("account", account);
+        request.setAttribute("theme", new JdbcWorkspaceDao().theme(account.id()));
         HabitStats stats = service.getStatsAsync(habits).join();
         request.setAttribute("habits", habits);
         request.setAttribute("stats", stats);

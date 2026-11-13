@@ -4,6 +4,8 @@ package com.habitflow.servlet;
 // Ayush Sharma (service validation, exceptions, collections and testing), Shivansh Singh (Servlets and web UI).
 
 import com.habitflow.service.HabitService;
+import com.habitflow.model.UserAccount;
+import com.habitflow.web.SecurityFilter;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -12,7 +14,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 
-// Servlets: this class handles habit creation and deletion requests.
+// Servlets: this class handles habit creation, updates and deletion requests.
 @WebServlet("/habits")
 public class HabitServlet extends HttpServlet {
     @Override
@@ -20,10 +22,24 @@ public class HabitServlet extends HttpServlet {
         request.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
         HabitService service = (HabitService) getServletContext().getAttribute("habitService");
         try {
-            service.create(request.getParameter("name"), request.getParameter("description"),
+            UserAccount account = (UserAccount) request.getSession(false).getAttribute(SecurityFilter.ACCOUNT);
+            String id = request.getParameter("id");
+            if (id == null || id.isBlank()) {
+                service.create(account.id(), request.getParameter("name"), request.getParameter("description"),
+                        request.getParameter("category"), request.getParameter("frequency"),
+                        request.getParameter("color"));
+                response.sendRedirect(request.getContextPath() + "/?message=Habit+created+successfully");
+                return;
+            }
+            long habitId = Long.parseLong(id);
+            int targetCount = Integer.parseInt(request.getParameter("targetCount"));
+            int targetTotal = Integer.parseInt(request.getParameter("targetTotal"));
+            service.update(account.id(), habitId, request.getParameter("name"), request.getParameter("description"),
                     request.getParameter("category"), request.getParameter("frequency"),
-                    request.getParameter("color"));
-            response.sendRedirect(request.getContextPath() + "/?message=Habit+created+successfully");
+                    request.getParameter("color"), request.getParameter("timeOfDay"), targetCount, targetTotal);
+            response.sendRedirect(request.getContextPath() + "/?message=Habit+updated+successfully");
+        } catch (NumberFormatException exception) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid habit update");
         } catch (IllegalArgumentException exception) {
             response.sendRedirect(request.getContextPath() + "/?error=" +
                     java.net.URLEncoder.encode(exception.getMessage(), java.nio.charset.StandardCharsets.UTF_8));
@@ -35,7 +51,8 @@ public class HabitServlet extends HttpServlet {
         HabitService service = (HabitService) getServletContext().getAttribute("habitService");
         String id = request.getParameter("id");
         try {
-            service.delete(Long.parseLong(id));
+            UserAccount account = (UserAccount) request.getSession(false).getAttribute(SecurityFilter.ACCOUNT);
+            service.delete(account.id(), Long.parseLong(id));
             response.setStatus(HttpServletResponse.SC_NO_CONTENT);
         } catch (NumberFormatException exception) {
             response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid habit id");

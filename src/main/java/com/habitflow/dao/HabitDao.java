@@ -11,11 +11,13 @@ import java.util.Optional;
 
 // OOP: this interface lists the database operations used by the service.
 public interface HabitDao {
-    List<Habit> findAllWithProgress(LocalDate today);
-    Optional<Habit> findById(long id);
-    long save(String name, String description, String category, String frequency, String color);
-    void delete(long id);
-    boolean hasCheckin(long habitId, LocalDate date);
-    void addCheckin(long habitId, LocalDate date, String note);
-    void removeCheckin(long habitId, LocalDate date);
+    List<Habit> findAllWithProgress(long userId, LocalDate today);
+    Optional<Habit> findById(long userId, long id);
+    long save(long userId, String name, String description, String category, String frequency, String color);
+    boolean update(long userId, long id, String name, String description, String category, String frequency,
+                   String color, String timeOfDay, int targetCount, int targetTotal, LocalDate targetDate);
+    void delete(long userId, long id);
+    boolean hasCheckin(long userId, long habitId, LocalDate date);
+    void addCheckin(long userId, long habitId, LocalDate date, String note);
+    void removeCheckin(long userId, long habitId, LocalDate date);
 }
