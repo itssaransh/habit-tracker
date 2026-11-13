@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Personal Habit Tracker is a Java web app for saving habits and recording which days they are completed. The dashboard shows a user's streaks and progress. HabitFlow is the name shown on the page.
+Personal Habit Tracker (HabitFlow) is a Java web app for saving private habits and recording which days they are completed. The dashboard shows a signed-in user's streaks and progress.
 
 ## Problem
 
@@ -12,6 +12,9 @@ People can forget which habits they completed or how regularly they followed a r
 
 - Add habits with a category and repeat schedule.
 - Save one check-in for a habit on each date.
+- Register and log in with a BCrypt password hash stored in the configured database.
+- Keep account data private using server-side sessions and user ownership in database queries.
+- Save notes, check-ins, daily targets, focus sessions, and preferences through the application API to the configured database.
 - Show current streak, best streak, weekly check-ins, and completion rate.
 - Practise Java OOP, collections, exceptions, JDBC, Servlets, and JSP.
 
@@ -25,23 +28,23 @@ People can forget which habits they completed or how regularly they followed a r
 
 ## Project structure
 
-Servlet classes receive browser requests. `DashboardServlet` loads the habit list and dashboard totals, then forwards them to `index.jsp`. `HabitService` checks form values and coordinates the operations. `HabitDao` defines the database work, and `JdbcHabitDao` runs SQL with prepared statements. `Database` opens connections and applies the schema when the app starts.
+Servlet classes receive browser requests. `SecurityFilter` requires a signed-in server session and checks CSRF tokens for write requests. `DashboardServlet` loads only the signed-in user's habits and totals, then forwards them to `index.jsp`. `AuthService` validates credentials and uses BCrypt. `HabitService` checks habit form values. The DAOs run prepared SQL with the session owner's ID. `Database` opens connections and applies versioned migrations when the app starts.
 
 The schedule classes represent daily, weekday, and weekly habits. `HabitScheduleFactory` selects a schedule based on the frequency saved for a habit. `HabitMetrics` calculates streaks and completion rates from check-in dates.
 
 ## Database
 
-The app has a `habits` table and a `habit_checkins` table. Each check-in belongs to one habit. A unique key on the habit and date stops duplicate check-ins. Deleting a habit also deletes its check-ins.
+The database has account, habit, check-in, preference, note, daily target, and focus-session tables. User-owned rows contain an account ID, and foreign keys associate them with that account's habits. A unique key on a habit and date stops duplicate check-ins. Old unowned shared records remain in the database but are hidden from new accounts.
 
 For local use, H2 saves data to a file in Tomcat's `data` folder. For hosting, the app connects to PostgreSQL using environment variables so that saved data does not depend on the web server's temporary disk.
 
 ## Main user steps
 
-1. Open the dashboard.
+1. Register an account or sign in.
 2. Add a habit and choose a category and schedule.
-3. Mark the habit complete when it is due.
-4. Review streaks and weekly progress.
-5. Undo a check-in or delete a habit when needed.
+3. Mark the habit complete when it is due and save notes or focus sessions.
+4. Sign in to the same account again to load its saved workspace. Access from a separate physical device is intended by the server-backed design but has not been verified for this release.
+5. Sign out before switching to another account.
 
 ## Team members
 
@@ -52,7 +55,7 @@ For local use, H2 saves data to a file in Tomcat's `data` folder. For hosting, t
 
 ## Scope and limitations
 
-The app does not have user accounts. If it is deployed publicly, everyone visiting it sees and can change the same habit list. It is suitable as a class project demo, not for storing private information. Render's free web service can sleep when idle, while the separate PostgreSQL database keeps the saved records.
+Password reset, email verification, and session/device history are not implemented. The account screen does not claim those features. The recorded local verification is a Java 17 build with 9 unit tests and 3 PostgreSQL integration tests against an isolated PostgreSQL 18.6 database, plus local Tomcat testing. The production Neon schema, production deployment, live URL for this release, and physical-device synchronization have not been verified. Before a production deployment, confirm a Neon recovery point and review the migrations against a safe copy of the existing schema. Legacy shared records remain unassigned and hidden from new accounts.
 
 ## Conclusion
 

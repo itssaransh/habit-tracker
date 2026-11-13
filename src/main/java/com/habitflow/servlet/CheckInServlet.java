@@ -4,6 +4,8 @@ package com.habitflow.servlet;
 // Ayush Sharma (service validation, exceptions, collections and testing), Shivansh Singh (Servlets and web UI).
 
 import com.habitflow.service.HabitService;
+import com.habitflow.model.UserAccount;
+import com.habitflow.web.SecurityFilter;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,7 +21,8 @@ public class CheckInServlet extends HttpServlet {
         request.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
         HabitService service = (HabitService) getServletContext().getAttribute("habitService");
         try {
-            service.toggleToday(Long.parseLong(request.getParameter("habitId")), request.getParameter("note"));
+            UserAccount account = (UserAccount) request.getSession(false).getAttribute(SecurityFilter.ACCOUNT);
+            service.toggleToday(account.id(), Long.parseLong(request.getParameter("habitId")), request.getParameter("note"));
             response.sendRedirect(request.getContextPath() + "/");
         } catch (NumberFormatException exception) {
             redirectWithError(request, response, "Invalid habit id");

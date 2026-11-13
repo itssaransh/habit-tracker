@@ -18,13 +18,15 @@ class HabitServiceTest {
     @Test
     void calculatesDashboardStatsFromHabitCollection() {
         HabitDao unusedDao = new HabitDao() {
-            public List<Habit> findAllWithProgress(LocalDate today) { return List.of(); }
-            public java.util.Optional<Habit> findById(long id) { return java.util.Optional.empty(); }
-            public long save(String name, String description, String category, String frequency, String color) { return 0; }
-            public void delete(long id) { }
-            public boolean hasCheckin(long habitId, LocalDate date) { return false; }
-            public void addCheckin(long habitId, LocalDate date, String note) { }
-            public void removeCheckin(long habitId, LocalDate date) { }
+            public List<Habit> findAllWithProgress(long userId, LocalDate today) { return List.of(); }
+            public java.util.Optional<Habit> findById(long userId, long id) { return java.util.Optional.empty(); }
+            public long save(long userId, String name, String description, String category, String frequency, String color) { return 0; }
+            public boolean update(long userId, long id, String name, String description, String category,
+                                  String frequency, String color, String time, int count, int total, LocalDate date) { return false; }
+            public void delete(long userId, long id) { }
+            public boolean hasCheckin(long userId,long habitId, LocalDate date) { return false; }
+            public void addCheckin(long userId,long habitId, LocalDate date, String note) { }
+            public void removeCheckin(long userId,long habitId, LocalDate date) { }
         };
         try (HabitService service = new HabitService(unusedDao)) {
             List<Habit> habits = List.of(
@@ -36,9 +38,13 @@ class HabitServiceTest {
             assertEquals(1, service.getStats(habits).completedToday());
             assertEquals(12, service.getStats(habits).bestStreak());
             assertThrows(IllegalArgumentException.class,
-                    () -> service.create("  ", "", "Mind", "Daily", "#5B5FEF"));
+                    () -> service.create(1,"  ", "", "Mind", "Daily", "#5B5FEF"));
             assertThrows(IllegalArgumentException.class,
-                    () -> service.toggleToday(1, "x".repeat(251)));
+                    () -> service.update(1, 99, "Read", "", "Mind", "Daily", "bad", "Anytime", 0, 1));
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.update(1, 99, "Read", "", "Mind", "Daily", "#5B5FEF", "Anytime", 2, 1));
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.toggleToday(1,1, "x".repeat(251)));
         }
     }
 }

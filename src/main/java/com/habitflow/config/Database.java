@@ -11,6 +11,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.ResultSet;
 
 // JDBC: connects to H2 locally or PostgreSQL in production.
 public final class Database {
@@ -53,9 +54,57 @@ public final class Database {
                     }
                 }
             }
+            runMigrations(connection);
         } catch (SQLException | IOException exception) {
             throw new IllegalStateException("Unable to initialize the database", exception);
         }
+    }
+
+    // Versioned additive migrations preserve existing habit records; legacy shared rows stay unassigned.
+    private static void runMigrations(Connection connection) throws SQLException, IOException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version VARCHAR(80) PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)");
+        }
+        String[] migrations = {"V001__user_accounts.sql", "V002__workspace_sync.sql", "V003__light_theme_default.sql"};
+        for (String migration : migrations) {
+            try (PreparedStatementCheck applied = new PreparedStatementCheck(connection, migration)) {
+                if (applied.exists()) continue;
+            }
+            String resource = "/db/migration/" + migration;
+            try (InputStream input = Database.class.getResourceAsStream(resource)) {
+                if (input == null) throw new IllegalStateException(resource + " was not found on the classpath");
+                String sql = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+                boolean autoCommit = connection.getAutoCommit();
+                connection.setAutoCommit(false);
+                try (Statement statement = connection.createStatement()) {
+                    for (String command : sql.split(";")) {
+                        if (!command.isBlank()) statement.execute(command);
+                    }
+                    try (var insert = connection.prepareStatement("INSERT INTO schema_migrations(version) VALUES (?)")) {
+                        insert.setString(1, migration);
+                        insert.executeUpdate();
+                    }
+                    connection.commit();
+                } catch (SQLException | RuntimeException failure) {
+                    connection.rollback();
+                    throw failure;
+                } finally {
+                    connection.setAutoCommit(autoCommit);
+                }
+            }
+        }
+    }
+
+    private static final class PreparedStatementCheck implements AutoCloseable {
+        private final java.sql.PreparedStatement statement;
+        private PreparedStatementCheck(Connection connection, String version) throws SQLException {
+            statement = connection.prepareStatement("SELECT 1 FROM schema_migrations WHERE version = ?");
+            statement.setString(1, version);
+        }
+        private boolean exists() throws SQLException {
+            try (ResultSet result = statement.executeQuery()) { return result.next(); }
+        }
+        @Override public void close() throws SQLException { statement.close(); }
     }
 
     private static String localUrl() {

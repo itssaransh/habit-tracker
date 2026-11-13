@@ -5,6 +5,8 @@ package com.habitflow.config;
 
 import com.habitflow.dao.JdbcHabitDao;
 import com.habitflow.service.HabitService;
+import com.habitflow.dao.JdbcUserDao;
+import com.habitflow.service.AuthService;
 import jakarta.servlet.ServletContextEvent;
 import jakarta.servlet.ServletContextListener;
 import jakarta.servlet.annotation.WebListener;
@@ -16,6 +18,7 @@ public class AppContextListener implements ServletContextListener {
     public void contextInitialized(ServletContextEvent event) {
         Database.initialize();
         event.getServletContext().setAttribute("habitService", new HabitService(new JdbcHabitDao()));
+        event.getServletContext().setAttribute("authService", new AuthService(new JdbcUserDao()));
     }
 
     @Override

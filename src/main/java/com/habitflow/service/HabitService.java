@@ -31,10 +31,10 @@ public class HabitService implements AutoCloseable {
         this.habitDao = Objects.requireNonNull(habitDao);
     }
 
-    public List<Habit> getHabits() {
+    public List<Habit> getHabits(long userId) {
         stateLock.readLock().lock();
         try {
-            return List.copyOf(habitDao.findAllWithProgress(LocalDate.now()));
+            return List.copyOf(habitDao.findAllWithProgress(userId, LocalDate.now()));
         } finally {
             stateLock.readLock().unlock();
         }
@@ -56,7 +56,7 @@ public class HabitService implements AutoCloseable {
         return CompletableFuture.supplyAsync(() -> getStats(habits), analyticsExecutor);
     }
 
-    public void create(String name, String description, String category, String frequency, String color) {
+    public void create(long userId, String name, String description, String category, String frequency, String color) {
         String cleanName = requireText(name, "Habit name");
         if (cleanName.length() > 120) throw new HabitValidationException("Habit name must be 120 characters or fewer");
         String cleanDescription = cleanText(description);
@@ -71,13 +71,43 @@ public class HabitService implements AutoCloseable {
 
         stateLock.writeLock().lock();
         try {
-            habitDao.save(cleanName, cleanDescription, cleanCategory, cleanFrequency, cleanColor.toUpperCase(Locale.ROOT));
+            habitDao.save(userId, cleanName, cleanDescription, cleanCategory, cleanFrequency, cleanColor.toUpperCase(Locale.ROOT));
         } finally {
             stateLock.writeLock().unlock();
         }
     }
 
-    public void toggleToday(long habitId, String note) {
+    public void update(long userId, long habitId, String name, String description, String category,
+                       String frequency, String color, String timeOfDay, int targetCount, int targetTotal) {
+        String cleanName = requireText(name, "Habit name");
+        if (cleanName.length() > 120) throw new HabitValidationException("Habit name must be 120 characters or fewer");
+        String cleanDescription = cleanText(description);
+        if (cleanDescription.length() > 500) throw new HabitValidationException("Description must be 500 characters or fewer");
+        String cleanCategory = requireText(category, "Category");
+        if (!CATEGORIES.contains(cleanCategory)) throw new HabitValidationException("Choose a listed category");
+        String cleanFrequency = normalizeFrequency(frequency);
+        String cleanColor = requireText(color, "Color");
+        if (!HEX_COLOR.matcher(cleanColor).matches()) throw new HabitValidationException("Choose a valid accent color");
+        String cleanTime = requireText(timeOfDay, "Time of day");
+        if (!Set.of("Anytime", "Morning", "Afternoon", "Evening").contains(cleanTime)) {
+            throw new HabitValidationException("Choose a valid time of day");
+        }
+        if (targetTotal < 1 || targetTotal > 50 || targetCount < 0 || targetCount > targetTotal) {
+            throw new HabitValidationException("Choose a valid daily target");
+        }
+
+        stateLock.writeLock().lock();
+        try {
+            boolean updated = habitDao.update(userId, habitId, cleanName, cleanDescription, cleanCategory,
+                    cleanFrequency, cleanColor.toUpperCase(Locale.ROOT), cleanTime, targetCount,
+                    targetTotal, LocalDate.now());
+            if (!updated) throw new HabitValidationException("That habit could not be found");
+        } finally {
+            stateLock.writeLock().unlock();
+        }
+    }
+
+    public void toggleToday(long userId, long habitId, String note) {
         LocalDate today = LocalDate.now();
         String cleanNote = cleanText(note);
         if (cleanNote.length() > 250) {
@@ -85,25 +115,25 @@ public class HabitService implements AutoCloseable {
         }
         stateLock.writeLock().lock();
         try {
-            Habit habit = habitDao.findById(habitId)
+            Habit habit = habitDao.findById(userId, habitId)
                     .orElseThrow(() -> new HabitValidationException("That habit could not be found"));
             if (!habit.isScheduledOn(today)) {
                 throw new HabitValidationException("This habit is not scheduled for today");
             }
-            if (habitDao.hasCheckin(habitId, today)) {
-                habitDao.removeCheckin(habitId, today);
+            if (habitDao.hasCheckin(userId, habitId, today)) {
+                habitDao.removeCheckin(userId, habitId, today);
             } else {
-                habitDao.addCheckin(habitId, today, cleanNote);
+                habitDao.addCheckin(userId, habitId, today, cleanNote);
             }
         } finally {
             stateLock.writeLock().unlock();
         }
     }
 
-    public void delete(long habitId) {
+    public void delete(long userId, long habitId) {
         stateLock.writeLock().lock();
         try {
-            habitDao.delete(habitId);
+            habitDao.delete(userId, habitId);
         } finally {
             stateLock.writeLock().unlock();
         }
