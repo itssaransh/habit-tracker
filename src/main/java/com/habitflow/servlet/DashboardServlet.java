@@ -10,6 +10,7 @@ import com.habitflow.service.HabitService;
 import com.habitflow.model.UserAccount;
 import com.habitflow.web.SecurityFilter;
 import com.habitflow.dao.JdbcWorkspaceDao;
+import com.habitflow.dao.JdbcUserDao;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -35,6 +36,7 @@ public class DashboardServlet extends HttpServlet {
         List<Habit> habits = service.getHabits(account.id());
         request.setAttribute("account", account);
         request.setAttribute("theme", new JdbcWorkspaceDao().theme(account.id()));
+        request.setAttribute("accountSettings", new JdbcUserDao().findSettings(account.id()));
         HabitStats stats = service.getStatsAsync(habits).join();
         request.setAttribute("habits", habits);
         request.setAttribute("stats", stats);

@@ -16,6 +16,9 @@ public final class RegisterServlet extends HttpServlet {
     }
     @Override protected void doPost(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
         try {
+            if(!java.util.Objects.equals(req.getParameter("password"),req.getParameter("confirmPassword"))) {
+                throw new IllegalArgumentException("Passwords do not match");
+            }
             AuthService auth=(AuthService)getServletContext().getAttribute("authService");
             UserAccount account=auth.register(req.getParameter("email"),req.getParameter("password"),req.getParameter("name"));
             HttpSession session=req.getSession(); req.changeSessionId();

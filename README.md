@@ -114,12 +114,22 @@ src/test/java/                Service, JDBC and security tests
 docs/                         Project report and database design
 ```
 
-## Team members
+## Team Members
 
-- **Shaswat Gupta:** OOP models and schedule classes.
-- **Saransh Mishra:** Database schema, JDBC configuration, and DAO classes.
-- **Ayush Sharma:** Service validation, exception handling, collections, and tests.
-- **Shivansh Singh:** Servlets and web UI.
+### Shaswat Gupta
+- **Role:** OOP Models & Scheduling Developer
+- **GitHub:** [@A1NAND1](https://github.com/A1NAND1)
+
+### Saransh Mishra
+- **Role:** Database Schema, JDBC & DAO Developer
+- **GitHub:** [@itssaransh](https://github.com/itssaransh)
+
+### Ayush Sharma
+- **Role:** Service Validation, Exception Handling & Testing Developer
+- **GitHub:** [@ayushsharma071203-creator](https://github.com/ayushsharma071203-creator)
+
+### Shivansh Singh
+- **Role:** Servlets & Web UI Developer
 
 ## Project documents
 

@@ -99,7 +99,9 @@ class WorkspaceIsolationTest {
         assertTrue(((Map<?,?>)bobWorkspace.get("done")).isEmpty());
         assertTrue(((Map<?,?>)bobWorkspace.get("metadata")).isEmpty());
         assertEquals(0,((Map<?,?>)bobWorkspace.get("focus")).get("totalMinutes"));
-        assertTrue(new JdbcHabitDao().findAllWithProgress(bob.id(),today).isEmpty());
+        var bobHabits=new JdbcHabitDao().findAllWithProgress(bob.id(),today);
+        assertEquals(3,bobHabits.size());
+        assertTrue(bobHabits.stream().noneMatch(habit->habit.id()==habitId));
         assertTrue(new JdbcHabitDao().findById(bob.id(),habitId).isEmpty());
     }
 }
