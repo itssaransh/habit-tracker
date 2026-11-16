@@ -36,7 +36,7 @@ public final class SecurityFilter implements Filter {
         if(session.getAttribute(CSRF)==null) session.setAttribute(CSRF,newToken());
         request.setAttribute(CSRF,session.getAttribute(CSRF));
 
-        boolean publicPath=path.equals("/login") || path.equals("/register") || path.equals("/health") || path.startsWith("/assets/") || path.equals("/favicon.ico");
+        boolean publicPath=path.equals("/login") || path.equals("/register") || path.equals("/forgot-password") || path.equals("/reset-password") || path.equals("/auth/google") || path.equals("/auth/google/callback") || path.equals("/health") || path.startsWith("/assets/") || path.equals("/favicon.ico");
         if(!publicPath && session.getAttribute(ACCOUNT)==null) {
             if(path.startsWith("/api/")) response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
             else response.sendRedirect(request.getContextPath()+"/login");

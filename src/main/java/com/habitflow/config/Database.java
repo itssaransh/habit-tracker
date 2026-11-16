@@ -65,7 +65,7 @@ public final class Database {
         try (Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version VARCHAR(80) PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)");
         }
-        String[] migrations = {"V001__user_accounts.sql", "V002__workspace_sync.sql", "V003__light_theme_default.sql"};
+        String[] migrations = {"V001__user_accounts.sql", "V002__workspace_sync.sql", "V003__light_theme_default.sql", "V004__account_preferences_and_dark_default.sql", "V005__light_theme_default.sql", "V006__google_identity.sql", "V007__password_reset_tokens.sql"};
         for (String migration : migrations) {
             try (PreparedStatementCheck applied = new PreparedStatementCheck(connection, migration)) {
                 if (applied.exists()) continue;
